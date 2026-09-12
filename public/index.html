@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>SetupEgiP V8</title>
+<title>SetupEgiP V9</title>
 <style>
 :root{--bg:#0b1020;--card:#121a2c;--card2:#18233a;--text:#eef3ff;--muted:#9fb0ce;--line:#293754;--good:#22c55e;--bad:#ef4444;--warn:#f59e0b}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,sans-serif}.wrap{max-width:1180px;margin:auto;padding:12px}
@@ -18,13 +18,25 @@ button{font-weight:700;cursor:pointer}.good{background:#153c26}.bad{background:#
 .statusline{padding:10px;border-radius:10px;background:var(--card2);margin-top:8px}.note{padding:10px;border-left:3px solid var(--warn);background:#2a2415;border-radius:8px}
 .pill{display:inline-block;padding:5px 9px;border-radius:999px;background:var(--card2);border:1px solid var(--line);font-size:12px;margin:2px 4px 2px 0}
 .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.actions button{min-height:48px}
-@media(max-width:600px){.actions{grid-template-columns:1fr 1fr}.big{font-size:23px}}
+
+.alertHero{border:1px solid var(--line);background:linear-gradient(180deg,var(--card2),var(--card));border-radius:14px;padding:14px;margin-top:10px}
+.alertTop{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+.alertBadge{font-size:24px;font-weight:900}
+.strengthWrap{margin-top:10px}
+.strengthTrack{height:10px;background:#0e1628;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.strengthFill{height:100%;width:0%;background:currentColor;transition:width .25s ease}
+.miniGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:12px}
+.mini{background:#10192b;border:1px solid var(--line);border-radius:10px;padding:10px}
+.mini span{display:block;color:var(--muted);font-size:11px;margin-bottom:4px}
+.mini b{font-size:17px}
+
+@media(max-width:600px){.actions{grid-template-columns:1fr 1fr}.big{font-size:23px}.alertBadge{font-size:21px}}
 </style>
 </head>
 <body>
 <div class="wrap">
 <div class="card">
-  <h1>SetupEgiP V8</h1>
+  <h1>SetupEgiP V9</h1>
   <div class="muted">OIL (Brent) • MEXC • WebSocket ao vivo + histórico via servidor seguro</div>
 </div>
 
@@ -66,9 +78,26 @@ button{font-weight:700;cursor:pointer}.good{background:#153c26}.bad{background:#
 
 
 <div class="card">
-  <h2>Alerta automático</h2>
-  <div id="alertBox" class="statusline"><b>Status:</b> <span id="alertStatus" class="neutral">aguardando sinal confirmado</span></div>
-  <div class="muted" id="alertDetail">O app avisa quando houver confluência forte e gatilho confirmado de provável compra ou venda.</div>
+  <h2>Alerta automático V9</h2>
+  <div class="alertHero">
+    <div class="alertTop">
+      <div id="alertStatus" class="alertBadge neutral">🟡 AGUARDAR</div>
+      <div id="alertStrength" class="pill">Força: —</div>
+    </div>
+    <div class="strengthWrap">
+      <div class="muted">Força do sinal <span id="alertScore">0/100</span></div>
+      <div class="strengthTrack"><div id="strengthFill" class="strengthFill neutral"></div></div>
+    </div>
+    <div class="miniGrid">
+      <div class="mini"><span>Preço atual</span><b id="alertPrice">—</b></div>
+      <div class="mini"><span>Entrada</span><b id="alertEntry">—</b></div>
+      <div class="mini"><span>Stop</span><b id="alertStop">—</b></div>
+      <div class="mini"><span>Alvo 1</span><b id="alertA1">—</b></div>
+      <div class="mini"><span>Alvo 2</span><b id="alertA2">—</b></div>
+      <div class="mini"><span>Atualizado</span><b id="alertTime">—</b></div>
+    </div>
+    <div class="muted" id="alertDetail" style="margin-top:10px">Aguardando confluência forte e gatilho confirmado.</div>
+  </div>
 </div>
 
 <div class="card">
@@ -94,8 +123,7 @@ button{font-weight:700;cursor:pointer}.good{background:#153c26}.bad{background:#
 
 <div class="card"><h2>Relatório</h2><div id="report" class="muted">Sem dados.</div></div>
 <div class="card"><div class="note">
-V8: inclui alerta automático de provável COMPRA/VENDA. O alerta só dispara com confluência forte e gatilho confirmado. Histórico corrigido para a API de Futuros da MEXC (contract.mexc.com), com fallback e diagnóstico no servidor. O preço ao vivo continua vindo diretamente da MEXC por WebSocket.
-</div></div>
+V9: painel de alerta completo com PROVÁVEL COMPRA, PROVÁVEL VENDA ou AGUARDAR, força do sinal, preço, entrada, stop e alvos. A notificação dispara apenas quando a condição muda para um novo sinal confirmado. Histórico via servidor e preço ao vivo por WebSocket da MEXC.</div></div>
 </div>
 
 <script>
@@ -104,8 +132,8 @@ const REST='/api/kline';
 const WS='wss://contract.mexc.com/edge';
 const $=x=>document.getElementById(x);
 const TFS=['Min15','Min60','Hour4','Day1'];
-let sock=null,pingTimer=null;
-let state={ticker:null,m:{},signal:'NEUTRO',setup:null,trigger:'AGUARDAR',raw:{},reportText:'',lastAlertKey:'',lastAlertAt:0};
+let sock=null,pingTimer=null,reconnectTimer=null;
+let state={ticker:null,m:{},signal:'NEUTRO',setup:null,trigger:'AGUARDAR',raw:{},reportText:'',lastAlertCondition:'AGUARDAR'};
 
 
 function beep(freq=880,dur=250){
@@ -119,26 +147,48 @@ async function enableAlerts(){
  else {$('alertStatus').textContent='permissão de notificação não concedida';$('alertStatus').className='warn'}
 }
 function alertEnabled(){return localStorage.getItem('SetupEgiP_alerts')==='on'}
-function maybeAlert(c,tr,m){
- let dir=state.signal.includes('LONG')?'COMPRA':state.signal.includes('SHORT')?'VENDA':'';
- if(!dir || tr.status!=='CONFIRMADA' || c.score<80){
-   $('alertStatus').textContent='aguardando sinal confirmado';$('alertStatus').className='neutral';
-   $('alertDetail').textContent='Sem alerta agora. É necessário confluência forte e gatilho confirmado.';return;
- }
- let key=dir+'|'+Math.round(c.score)+'|'+Math.round((m?.cp||0)*100)/100;
- $('alertStatus').textContent='PROVÁVEL '+dir+' • score '+c.score+'/100';$('alertStatus').className=dir==='COMPRA'?'long':'short';
- $('alertDetail').textContent='Preço $ '+fmt(m?.cp)+' • '+tr.why;
- let now=Date.now(),cooldown=30*60*1000;
- if(state.lastAlertKey===key && now-state.lastAlertAt<cooldown)return;
- state.lastAlertKey=key;state.lastAlertAt=now;
- localStorage.setItem('SetupEgiP_lastAlert',JSON.stringify({key,at:now}));
- beep(dir==='COMPRA'?920:520,320);
- if(alertEnabled() && 'Notification' in window && Notification.permission==='granted'){
-   let q=state.setup;
-   let body='Preço $ '+fmt(m?.cp)+' • Score '+c.score+'/100'+(q?' • Stop $ '+fmt(q.st)+' • A1 $ '+fmt(q.a1):'');
-   try{new Notification('SetupEgiP V8 — Provável '+dir,{body,tag:'setupegip-signal'})}catch(e){}
- }
+function signalStrength(score){
+  if(score>=80)return 'FORTE';
+  if(score>=60)return 'MODERADA';
+  return 'FRACA';
 }
+function renderAlertPanel(c,tr,m){
+  let dir=state.signal.includes('LONG')?'COMPRA':state.signal.includes('SHORT')?'VENDA':'';
+  let eligible=!!dir && tr.status==='CONFIRMADA' && c.score>=80;
+  let status=eligible?('PROVÁVEL '+dir):'AGUARDAR';
+  let icon=eligible?(dir==='COMPRA'?'🟢 ':'🔴 '):'🟡 ';
+  let klass=eligible?(dir==='COMPRA'?'long':'short'):'warn';
+  let q=state.setup;
+
+  $('alertStatus').textContent=icon+status;
+  $('alertStatus').className='alertBadge '+klass;
+  $('alertStrength').textContent='Força: '+signalStrength(c.score);
+  $('alertScore').textContent=c.score+'/100';
+  $('strengthFill').style.width=Math.max(0,Math.min(100,c.score))+'%';
+  $('strengthFill').className='strengthFill '+klass;
+  $('alertPrice').textContent='$ '+fmt(m?.cp);
+  $('alertEntry').textContent=q?'$ '+fmt(q.e):'—';
+  $('alertStop').textContent=q?'$ '+fmt(q.st):'—';
+  $('alertA1').textContent=q?'$ '+fmt(q.a1):'—';
+  $('alertA2').textContent=q?'$ '+fmt(q.a2):'—';
+  $('alertTime').textContent=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  $('alertDetail').textContent=eligible?tr.why:'Sem alerta agora. '+tr.why;
+
+  let condition=eligible?dir:'AGUARDAR';
+  if(condition!==state.lastAlertCondition){
+    state.lastAlertCondition=condition;
+    localStorage.setItem('SetupEgiP_V9_lastCondition',condition);
+    if(eligible){
+      beep(dir==='COMPRA'?920:520,320);
+      if(alertEnabled() && 'Notification' in window && Notification.permission==='granted'){
+        let body='Preço $ '+fmt(m?.cp)+' • Força '+c.score+'/100'
+          +(q?' • Entrada $ '+fmt(q.e)+' • Stop $ '+fmt(q.st)+' • A1 $ '+fmt(q.a1)+' • A2 $ '+fmt(q.a2):'');
+        try{new Notification('SetupEgiP V9 — Provável '+dir,{body,tag:'setupegip-signal'})}catch(e){}
+      }
+    }
+  }
+}
+function maybeAlert(c,tr,m){renderAlertPanel(c,tr,m)}
 
 function fmt(n,d=3){return n==null||!isFinite(n)?'—':Number(n).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d})}
 function ema(v,p){if(v.length<p)return null;let k=2/(p+1),e=v[0];for(let i=1;i<v.length;i++)e=v[i]*k+e*(1-k);return e}
@@ -147,7 +197,7 @@ function atr(h,l,c,p=14){if(c.length<p+1)return null;let tr=[];for(let i=1;i<c.l
 function cls(s){return s.includes('LONG')?'long':s.includes('SHORT')?'short':'neutral'}
 function prefix(s){if(s==='LONG FORTE')return'L+_';if(s==='LONG')return'L_';if(s==='SHORT FORTE')return'S+_';if(s==='SHORT')return'S_';return'N_'}
 
-function cacheKey(tf){return 'SetupEgiP_V8_'+SYMBOL+'_'+tf}
+function cacheKey(tf){return 'SetupEgiP_V9_'+SYMBOL+'_'+tf}
 function saveCache(tf,k){
   try{
     let rows=k.c.map((_,i)=>({t:k.t[i],h:k.h[i],l:k.l[i],c:k.c[i],v:k.v[i]})).slice(-700);
@@ -173,6 +223,7 @@ function mergeBar(tf,b){
 }
 
 function connectWS(){
+ clearTimeout(reconnectTimer);
  if(sock)try{sock.close()}catch(e){}
  $('wsStatus').textContent='conectando...';$('wsStatus').className='warn';
  sock=new WebSocket(WS);
@@ -199,7 +250,7 @@ function connectWS(){
    }catch(err){}
  };
  sock.onerror=()=>{$('wsStatus').textContent='erro de conexão';$('wsStatus').className='short'};
- sock.onclose=()=>{$('wsStatus').textContent='desconectado';$('wsStatus').className='warn';clearInterval(pingTimer)};
+ sock.onclose=()=>{$('wsStatus').textContent='desconectado — reconectando...';$('wsStatus').className='warn';clearInterval(pingTimer);clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connectWS,5000)};
 }
 function renderTicker(t){
  $('price').textContent='$ '+fmt(+t.lastPrice,3);
@@ -216,7 +267,7 @@ async function fetchWithTimeout(url,ms=10000){
  }finally{clearTimeout(tm)}
 }
 function proxyUrls(url){
- return [{name:'Servidor SetupEgiP V8',url}];
+ return [{name:'Servidor SetupEgiP V9',url}];
 }
 async function kline(tf){
  const sec={Min15:900,Min60:3600,Hour4:14400,Day1:86400}[tf];
@@ -274,7 +325,7 @@ async function loadHistory(){
    }
    $('histStatus').textContent='histórico ainda bloqueado';$('histStatus').className='short';
    $('histSource').textContent='WebSocket ativo; cache insuficiente';
-   $('report').innerHTML='<span class="short"><b>Não foi possível obter 210+ candles por timeframe.</b></span> O preço ao vivo continua funcionando. A V7 precisa ser executada pelo servidor incluído no pacote. O servidor agora usa a API correta de Futuros da MEXC (contract.mexc.com). Se você abrir apenas o arquivo HTML, o histórico não funcionará.';
+   $('report').innerHTML='<span class="short"><b>Não foi possível obter 210+ candles por timeframe.</b></span> O preço ao vivo continua funcionando. A V9 precisa ser executada pelo servidor incluído no pacote. O servidor agora usa a API correta de Futuros da MEXC (contract.mexc.com). Se você abrir apenas o arquivo HTML, o histórico não funcionará.';
  }
 }
 
@@ -315,9 +366,9 @@ function detectMode(){
  const hosted = location.protocol==='http:' || location.protocol==='https:';
  const el=$('modeStatus');
  if(hosted){el.textContent='hospedado/servidor ativo';el.className='ok'}
- else{el.textContent='arquivo local — use o servidor V8';el.className='short'}
+ else{el.textContent='arquivo local — use o servidor V9';el.className='short'}
 }
-function start(){detectMode();connectWS();loadHistory()}
+function start(){detectMode();state.lastAlertCondition=localStorage.getItem('SetupEgiP_V9_lastCondition')||'AGUARDAR';connectWS();loadHistory()}
 $('tf').addEventListener('change',()=>{if(Object.keys(state.m).length)renderTechnical()});
 ['capital','risk','lev','fx'].forEach(id=>$(id).addEventListener('change',renderSetup));
 start();
